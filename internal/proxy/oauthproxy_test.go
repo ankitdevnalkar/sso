@@ -1191,16 +1191,15 @@ func TestHeaderOverrides(t *testing.T) {
 
 func TestHTTPSRedirect(t *testing.T) {
 	testCases := []struct {
-		name                 string
-		url                  string
-		host                 string
-		cookieSecure         bool
-		authenticated        bool
-		requestHeaders       map[string]string
-		expectedCode         int
-		expectedLocation     string // must match entire Location header
-		expectedLocationHost string // just match hostname of Location header
-		expectSTS            bool   // should we get a Strict-Transport-Security header?
+		name             string
+		url              string
+		host             string
+		cookieSecure     bool
+		authenticated    bool
+		requestHeaders   map[string]string
+		expectedCode     int
+		expectedLocation string // must match entire Location header
+		expectSTS        bool   // should we get a Strict-Transport-Security header?
 	}{
 		{
 			name:          "no https redirect with http and cookie_secure=false and authenticated=true",
@@ -1211,13 +1210,20 @@ func TestHTTPSRedirect(t *testing.T) {
 			expectSTS:     false,
 		},
 		{
-			name:                 "no https redirect with http cookie_secure=false and authenticated=false",
-			url:                  "http://localhost/",
-			cookieSecure:         false,
-			authenticated:        false,
-			expectedCode:         http.StatusFound,
-			expectedLocationHost: "localhost",
-			expectSTS:            false,
+			name:          "no https redirect with http cookie_secure=false and authenticated=false",
+			url:           "http://localhost/",
+			cookieSecure:  false,
+			authenticated: false,
+			expectedCode:  http.StatusFound,
+			expectSTS:     false,
+		},
+		{
+			name:          "no https redirect with https and cookie_secure=false and authenticated=false",
+			url:           "https://localhost/",
+			cookieSecure:  false,
+			authenticated: false,
+			expectedCode:  http.StatusFound,
+			expectSTS:     false,
 		},
 		{
 			name:          "no https redirect with https and cookie_secure=false and authenticated=true",
@@ -1227,16 +1233,7 @@ func TestHTTPSRedirect(t *testing.T) {
 			expectedCode:  http.StatusOK,
 			expectSTS:     false,
 		},
-		{
-			name:                 "no https redirect with https and cookie_secure=false and authenticated=false",
-			url:                  "https://localhost/",
-			cookieSecure:         false,
-			authenticated:        false,
-			expectedCode:         http.StatusFound,
-			expectedLocationHost: "localhost",
-			expectSTS:            false,
-		},
-		{
+		{ //TODO
 			name:             "https redirect with cookie_secure=true and authenticated=false",
 			url:              "http://localhost/",
 			cookieSecure:     true,
@@ -1331,16 +1328,21 @@ func TestHTTPSRedirect(t *testing.T) {
 			}
 
 			location := rw.Header().Get("Location")
-			locationURL, err := url.Parse(location)
-
-			if err != nil {
-				t.Errorf("error parsing location %q: %s", location, err)
-			}
 			if tc.expectedLocation != "" && location != tc.expectedLocation {
 				t.Errorf("expected Location=%q, got Location=%q", tc.expectedLocation, location)
 			}
-			if tc.expectedLocationHost != "" && locationURL.Hostname() != tc.expectedLocationHost {
-				t.Errorf("expected location host = %q, got %q", tc.expectedLocationHost, locationURL.Hostname())
+
+			// if we do not require https, and there is no session we expect a sign in page to be
+			// rendered
+			if !tc.cookieSecure && !tc.authenticated {
+				expectedBody := "Sign in with"
+				actualBody, err := ioutil.ReadAll(rw.Body)
+				testutil.Assert(t, err == nil, "could not read http response body: %v", err)
+				if !strings.Contains(string(actualBody), expectedBody) {
+					t.Logf("expected body to contain: %q", expectedBody)
+					t.Logf("          got: %q", string(actualBody))
+					t.Errorf("received invalid body")
+				}
 			}
 
 			stsKey := http.CanonicalHeaderKey("Strict-Transport-Security")
