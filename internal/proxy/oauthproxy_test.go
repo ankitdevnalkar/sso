@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -67,6 +68,14 @@ func setCookieSecure(cookieSecure bool) func(*OAuthProxy) error {
 		p.cookieSecure = cookieSecure
 		return nil
 	}
+}
+
+type TemplateSpy struct {
+	executeTemplate func(io.Writer, string, interface{})
+}
+
+func (s TemplateSpy) ExecuteTemplate(rw io.Writer, tpl string, data interface{}) {
+	s.executeTemplate(rw, tpl, data)
 }
 
 func testSession() *sessions.SessionState {
@@ -914,6 +923,7 @@ func TestOAuthStart(t *testing.T) {
 			}
 
 			proxy, close := testNewOAuthProxy(t,
+
 				setSessionStore(&sessions.MockSessionStore{}),
 				setCSRFStore(csrfStore),
 				setCookieCipher(cookieCipher),
@@ -925,44 +935,55 @@ func TestOAuthStart(t *testing.T) {
 			if tc.isXHR {
 				req.Header.Add("X-Requested-With", "XMLHttpRequest")
 			}
+			// proxy.OAuthStart results in a html page being rendered with some data
+			// in it that we want test.
+			// We take advantage of proxy.templates being an interface and use it to
+			// test the 'state' in the struct that is used to render the html page, rather
+			// than parsing the html page itself for the state.
+			proxy.templates = &TemplateSpy{
+				executeTemplate: func(rw io.Writer, tpl string, data interface{}) {
+					signInResp, ok := data.(signInResp)
+					if !ok {
+						t.Fatalf("Invalid struct used: expected 'signInResp'")
+					}
 
+					state := signInResp.SignInParams.State
+
+					cookieParameter := &StateParameter{}
+					err = json.Unmarshal([]byte(csrfStore.ResponseCSRF), cookieParameter)
+					if err != nil {
+						t.Errorf("response csrf: %v", csrfStore.ResponseCSRF)
+						t.Fatalf("unexpected err during unmarshal: %v", err)
+					}
+
+					stateParameter := &StateParameter{}
+					err = json.Unmarshal([]byte(state), stateParameter)
+					if err != nil {
+						t.Errorf("state: %v", state)
+						t.Fatalf("unexpected err during unmarshal: %v", err)
+					}
+
+					if !reflect.DeepEqual(cookieParameter, stateParameter) {
+						t.Logf("cookie parameter: %#v", cookieParameter)
+						t.Logf(" state parameter: %#v", stateParameter)
+						t.Fatalf("expected structs to be equal")
+					}
+				},
+			}
+			// Note: In this case, proxy.OAuthStart does not cause a html page
+			// to be rendered due to us replacing proxy.templates above.
 			proxy.OAuthStart(rw, req, []string{})
 			res := rw.Result()
 
 			if res.StatusCode != tc.expectedStatusCode {
-				t.Fatalf("unexpected status code response")
+				t.Logf("expected status code: %q", tc.expectedStatusCode)
+				t.Logf("                 got: %q", res.StatusCode)
+				t.Fatalf("unexpected status code returned")
 			}
 
+			//TODO: what's the intended course of action here?
 			if tc.expectedStatusCode != http.StatusFound {
 				return
-			}
-
-			location, err := res.Location()
-			if err != nil {
-				t.Fatalf("expected req to succeeded err:%v", err)
-			}
-
-			state := location.Query().Get("state")
-
-			cookieParameter := &StateParameter{}
-			err = json.Unmarshal([]byte(csrfStore.ResponseCSRF), cookieParameter)
-			if err != nil {
-				t.Errorf("response csrf: %v", csrfStore.ResponseCSRF)
-				t.Fatalf("unexpected err during unmarshal: %v", err)
-			}
-
-			stateParameter := &StateParameter{}
-			err = json.Unmarshal([]byte(state), stateParameter)
-			if err != nil {
-				t.Errorf("location: %v", location)
-				t.Errorf("state: %v", state)
-				t.Fatalf("unexpected err during unmarshal: %v", err)
-			}
-
-			if !reflect.DeepEqual(cookieParameter, stateParameter) {
-				t.Logf("cookie parameter: %#v", cookieParameter)
-				t.Logf(" state parameter: %#v", stateParameter)
-				t.Fatalf("expected structs to be equal")
 			}
 		})
 	}
@@ -1311,6 +1332,7 @@ func TestHTTPSRedirect(t *testing.T) {
 
 			location := rw.Header().Get("Location")
 			locationURL, err := url.Parse(location)
+
 			if err != nil {
 				t.Errorf("error parsing location %q: %s", location, err)
 			}
