@@ -1361,3 +1361,125 @@ func TestHTTPSRedirect(t *testing.T) {
 		})
 	}
 }
+
+func TestSignOutPage(t *testing.T) {
+	testCases := []struct {
+		Name                string
+		ExpectedStatusCode  int
+		cookieSecure        bool
+		mockSessionStore    *sessions.MockSessionStore
+		RevokeError         error
+		expectedSignOutResp signOutResp
+		mockTemplateFunc    bool
+	}{
+		{
+			Name:             "successful sign out response",
+			mockTemplateFunc: true,
+			mockSessionStore: &sessions.MockSessionStore{
+				Session: &sessions.SessionState{
+					Email:           "test@example.com",
+					RefreshDeadline: time.Now().Add(time.Hour),
+					AccessToken:     "accessToken",
+					RefreshToken:    "refreshToken",
+				},
+			},
+			ExpectedStatusCode: http.StatusOK,
+			expectedSignOutResp: signOutResp{
+				ProviderSlug: "Test Provider",
+				Version:      VERSION,
+				Action:       "http://localhost/oauth/sign_out",
+				Destination:  "localhost",
+				Email:        "test@example.com",
+				SignOutParams: providers.SignOutParams{
+					//TODO: where is example.com coming from?
+					RedirectURL: "http://example.com/",
+				},
+			},
+		},
+		{
+			Name:             "successful sign out page",
+			mockTemplateFunc: true,
+			mockSessionStore: &sessions.MockSessionStore{
+				Session: &sessions.SessionState{
+					Email:           "test@example.com",
+					RefreshDeadline: time.Now().Add(time.Hour),
+					AccessToken:     "accessToken",
+					RefreshToken:    "refreshToken",
+				},
+			},
+			ExpectedStatusCode: http.StatusOK,
+		},
+		{ // TODO: We should change this test (and the underlying code it tests
+			// to redirect to sso-auth
+			Name:             "render error page if no session exists.",
+			mockTemplateFunc: true,
+			mockSessionStore: &sessions.MockSessionStore{
+				LoadError: http.ErrNoCookie,
+			},
+			ExpectedStatusCode: http.StatusInternalServerError,
+		},
+		//{
+		//	Name: "cookieSecure sets scheme to https, if no scheme included",
+		//},
+		//{
+		//	Name: "session is cleared before rendering template",
+		//},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+
+			// set up the provider
+			providerURL, _ := url.Parse("http://localhost/")
+			testProvider := providers.NewTestProvider(providerURL, "")
+
+			proxy, close := testNewOAuthProxy(t,
+				SetProvider(testProvider),
+				setSessionStore(tc.mockSessionStore),
+				setCookieSecure(tc.cookieSecure),
+			)
+			defer close()
+
+			// if this particular test case tests for a specific response struct,
+			// we replace the proxy template function to avoid having to parse
+			// the html response
+			if tc.expectedSignOutResp != (signOutResp{}) {
+				proxy.templates = &TemplateSpy{
+					executeTemplate: func(rw io.Writer, tpl string, data interface{}) {
+						signOutResp, ok := data.(signOutResp)
+						if !ok {
+							t.Fatalf("Invalid struct used: expected 'signOutResp'")
+						}
+
+						testutil.Equal(t, tc.expectedSignOutResp, signOutResp)
+					},
+				}
+			}
+
+			rw := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/sign_out", nil)
+
+			proxy.SignOutPage(rw, req)
+
+			testutil.Equal(t, tc.ExpectedStatusCode, rw.Code)
+
+			// if this particular test case doesn't test for a specific
+			// response struct, and we expect a successful response
+			// we instead make sure that the template is returned as expected.
+			if tc.expectedSignOutResp == (signOutResp{}) && tc.ExpectedStatusCode != 500 {
+				resp := rw.Result()
+				respBytes, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					t.Errorf("unable to properly parse response: %v", err)
+				}
+
+				expectedBody := "Sign out of <b>localhost</b>"
+				actualBody := string(respBytes)
+				if !strings.Contains(actualBody, expectedBody) {
+					t.Logf("expected body to contain: %q", expectedBody)
+					t.Logf("                     got: %q", actualBody)
+					t.Errorf("received invalid body")
+				}
+			}
+		})
+	}
+}

@@ -396,6 +396,10 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		// TODO: What do we want the flow to be in this situation?
 		// Render an error page, redirect to redirectURL, render sign in page
+		//
+		// If this is the case, then we have no email address to use.
+		// Let's redirect to sso-auth to ensure its session is cleared properly,
+		// but ideally without having to make another, very similar html page?
 		p.ErrorPage(rw, req, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
@@ -421,7 +425,7 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	destinationURL, _ := url.Parse(signOutURL.String())
 
 	t := signOutResp{
-		ProviderSlug:  strings.Title(p.provider.Data().ProviderSlug),
+		ProviderSlug:  strings.Title(p.provider.Data().ProviderName),
 		Version:       VERSION,
 		Action:        signOutURL.String(),
 		Destination:   destinationURL.Host,
@@ -430,6 +434,7 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	p.sessionStore.ClearSession(rw, req)
+	//set a header code?
 	p.templates.ExecuteTemplate(rw, "sign_out.html", t)
 	return
 }
@@ -545,7 +550,6 @@ func (p *OAuthProxy) OAuthStart(rw http.ResponseWriter, req *http.Request, tags 
 		p.ErrorPage(rw, req, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
-
 	logger.Info("redirecting to sign in page")
 	p.SignInPage(rw, req, encryptedState)
 }
