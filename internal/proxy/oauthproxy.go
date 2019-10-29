@@ -357,7 +357,6 @@ type signInResp struct {
 // SignInPage renders a sign in page stating the in-use provider and email domains,
 // and redirects to sso_auth.
 func (p *OAuthProxy) SignInPage(rw http.ResponseWriter, req *http.Request, state string) {
-	//TODO: Is this what we want?
 	rw.WriteHeader(http.StatusFound)
 
 	// this forms req.Host + /oauth2/callback
@@ -392,18 +391,6 @@ type signOutResp struct {
 
 // SignOutPage renders a sign out page
 func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
-	session, err := p.sessionStore.LoadSession(req)
-	if err != nil {
-		// TODO: What do we want the flow to be in this situation?
-		// Render an error page, redirect to redirectURL, render sign in page
-		//
-		// If this is the case, then we have no email address to use.
-		// Let's redirect to sso-auth to ensure its session is cleared properly,
-		// but ideally without having to make another, very similar html page?
-		p.ErrorPage(rw, req, http.StatusInternalServerError, "Internal Error", err.Error())
-		return
-	}
-
 	// Build redirect URI from request host
 	var scheme string
 	scheme = req.URL.Scheme
@@ -424,6 +411,23 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	signOutURL, signOutParams := p.provider.GetSignOutURL(redirectURL)
 	destinationURL, _ := url.Parse(signOutURL.String())
 
+	session, err := p.sessionStore.LoadSession(req)
+	if err != nil {
+		// If no session exists on sso_proxy, we just redirect
+		// straight to sso_auth so any session there can be properly
+		// cleared
+		params, _ := url.ParseQuery(signOutURL.RawQuery)
+		params.Set("redirect_uri", signOutParams.RedirectURL)
+		params.Set("ts", signOutParams.TimeStamp)
+		params.Set("sig", signOutParams.Signature)
+		signOutURL.RawQuery = params.Encode()
+
+		p.sessionStore.ClearSession(rw, req)
+		http.Redirect(rw, req, signOutURL.String(), http.StatusFound)
+		return
+	}
+
+	// else, if there is a session we render a sign out page
 	t := signOutResp{
 		ProviderSlug:  strings.Title(p.provider.Data().ProviderName),
 		Version:       VERSION,
@@ -434,9 +438,7 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	p.sessionStore.ClearSession(rw, req)
-	//set a header code?
 	p.templates.ExecuteTemplate(rw, "sign_out.html", t)
-	return
 }
 
 // ErrorPage renders an error page with a given status code, title, and message.
