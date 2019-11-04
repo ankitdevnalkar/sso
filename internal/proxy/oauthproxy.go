@@ -392,8 +392,8 @@ type signOutResp struct {
 // SignOutPage renders a sign out page
 func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	// Build redirect URI from request host
-	var scheme string
-	scheme = req.URL.Scheme
+
+	scheme := req.URL.Scheme
 	if req.URL.Scheme == "" {
 		if p.cookieSecure {
 			scheme = "https"
@@ -409,7 +409,6 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	signOutURL, signOutParams := p.provider.GetSignOutURL(redirectURL)
-	destinationURL, _ := url.Parse(signOutURL.String())
 
 	session, err := p.sessionStore.LoadSession(req)
 	if err != nil {
@@ -429,10 +428,10 @@ func (p *OAuthProxy) SignOutPage(rw http.ResponseWriter, req *http.Request) {
 
 	// else, if there is a session we render a sign out page
 	t := signOutResp{
-		ProviderSlug:  strings.Title(p.provider.Data().ProviderName),
+		ProviderSlug:  strings.Title(p.provider.Data().ProviderSlug),
 		Version:       VERSION,
 		Action:        signOutURL.String(),
-		Destination:   destinationURL.Host,
+		Destination:   redirectURL.Host,
 		Email:         session.Email,
 		SignOutParams: signOutParams,
 	}

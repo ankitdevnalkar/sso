@@ -74,6 +74,7 @@ type TemplateSpy struct {
 	executeTemplate func(io.Writer, string, interface{})
 }
 
+// TODO: we can probably use the mock_template package...
 func (s TemplateSpy) ExecuteTemplate(rw io.Writer, tpl string, data interface{}) {
 	s.executeTemplate(rw, tpl, data)
 }
@@ -1328,7 +1329,7 @@ func TestHTTPSRedirect(t *testing.T) {
 			}
 
 			location := rw.Header().Get("Location")
-			if tc.expectedLocation != "" && location != tc.expectedLocation {
+			if location != tc.expectedLocation {
 				t.Errorf("expected Location=%q, got Location=%q", tc.expectedLocation, location)
 			}
 
@@ -1370,11 +1371,10 @@ func TestSignOutPage(t *testing.T) {
 		mockSessionStore    *sessions.MockSessionStore
 		RevokeError         error
 		expectedSignOutResp signOutResp
-		mockTemplateFunc    bool
+		expectedLocation    string
 	}{
 		{
-			Name:             "successful sign out response",
-			mockTemplateFunc: true,
+			Name: "successful sign out response",
 			mockSessionStore: &sessions.MockSessionStore{
 				Session: &sessions.SessionState{
 					Email:           "test@example.com",
@@ -1397,8 +1397,7 @@ func TestSignOutPage(t *testing.T) {
 			},
 		},
 		{
-			Name:             "successful sign out page",
-			mockTemplateFunc: true,
+			Name: "successful rendered sign out html page",
 			mockSessionStore: &sessions.MockSessionStore{
 				Session: &sessions.SessionState{
 					Email:           "test@example.com",
@@ -1409,20 +1408,19 @@ func TestSignOutPage(t *testing.T) {
 			},
 			ExpectedStatusCode: http.StatusOK,
 		},
-		{ // TODO: We should change this test (and the underlying code it tests
-			// to redirect to sso-auth
-			Name:             "render error page if no session exists.",
-			mockTemplateFunc: true,
+		{ // TODO: Check the redirect URL is what we expect
+			Name: "redirect to sso_auth if no session exists",
 			mockSessionStore: &sessions.MockSessionStore{
 				LoadError: http.ErrNoCookie,
 			},
-			ExpectedStatusCode: http.StatusInternalServerError,
+			ExpectedStatusCode: http.StatusFound,
+			expectedLocation:   "http://localhost/oauth/sign_out?redirect_uri=http%3A%2F%2Fexample.com%2F&sig=&ts=",
 		},
 		//{
 		//	Name: "cookieSecure sets scheme to https, if no scheme included",
 		//},
 		//{
-		//	Name: "session is cleared before rendering template",
+		//	Name: "session is cleared before rendering template/redirecting",
 		//},
 	}
 	for _, tc := range testCases {
@@ -1462,10 +1460,15 @@ func TestSignOutPage(t *testing.T) {
 
 			testutil.Equal(t, tc.ExpectedStatusCode, rw.Code)
 
+			location := rw.Header().Get("Location")
+			if location != tc.expectedLocation {
+				t.Errorf("expected Location=%q, got Location=%q", tc.expectedLocation, location)
+			}
+
 			// if this particular test case doesn't test for a specific
-			// response struct, and we expect a successful response
-			// we instead make sure that the template is returned as expected.
-			if tc.expectedSignOutResp == (signOutResp{}) && tc.ExpectedStatusCode != 500 {
+			// response struct, and is not a straight redirect,
+			// then make sure that the template is returned as expected.
+			if tc.expectedSignOutResp == (signOutResp{}) && tc.ExpectedStatusCode != 302 {
 				resp := rw.Result()
 				respBytes, err := ioutil.ReadAll(resp.Body)
 				if err != nil {
