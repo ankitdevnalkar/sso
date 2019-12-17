@@ -1374,29 +1374,6 @@ func TestSignOutPage(t *testing.T) {
 		expectedLocation    string
 	}{
 		{
-			Name: "successful sign out response",
-			mockSessionStore: &sessions.MockSessionStore{
-				Session: &sessions.SessionState{
-					Email:           "test@example.com",
-					RefreshDeadline: time.Now().Add(time.Hour),
-					AccessToken:     "accessToken",
-					RefreshToken:    "refreshToken",
-				},
-			},
-			ExpectedStatusCode: http.StatusOK,
-			expectedSignOutResp: signOutResp{
-				ProviderSlug: "Test Provider",
-				Version:      VERSION,
-				Action:       "http://localhost/oauth/sign_out",
-				Destination:  "localhost",
-				Email:        "test@example.com",
-				SignOutParams: providers.SignOutParams{
-					//TODO: where is example.com coming from?
-					RedirectURL: "http://example.com/",
-				},
-			},
-		},
-		{
 			Name: "successful rendered sign out html page",
 			mockSessionStore: &sessions.MockSessionStore{
 				Session: &sessions.SessionState{
@@ -1408,13 +1385,36 @@ func TestSignOutPage(t *testing.T) {
 			},
 			ExpectedStatusCode: http.StatusOK,
 		},
+		{
+			Name: "successful sign out response",
+			mockSessionStore: &sessions.MockSessionStore{
+				Session: &sessions.SessionState{
+					Email:           "test@example.com",
+					RefreshDeadline: time.Now().Add(time.Hour),
+					AccessToken:     "accessToken",
+					RefreshToken:    "refreshToken",
+				},
+			},
+			ExpectedStatusCode: http.StatusOK,
+			expectedSignOutResp: signOutResp{
+				//TODO: standardise on ProviderSlug or ProviderName?
+				ProviderSlug: "",
+				Version:      VERSION,
+				Action:       "http://localhost/oauth/sign_out",
+				Destination:  "example.com",
+				Email:        "test@example.com",
+				SignOutParams: providers.SignOutParams{
+					RedirectURL: "https://example.com/",
+				},
+			},
+		},
 		{ // TODO: Check the redirect URL is what we expect
 			Name: "redirect to sso_auth if no session exists",
 			mockSessionStore: &sessions.MockSessionStore{
 				LoadError: http.ErrNoCookie,
 			},
 			ExpectedStatusCode: http.StatusFound,
-			expectedLocation:   "http://localhost/oauth/sign_out?redirect_uri=http%3A%2F%2Fexample.com%2F&sig=&ts=",
+			expectedLocation:   "http://localhost/oauth/sign_out?redirect_uri=https%3A%2F%2Fexample.com%2F&sig=&ts=",
 		},
 		//{
 		//	Name: "cookieSecure sets scheme to https, if no scheme included",
@@ -1454,7 +1454,7 @@ func TestSignOutPage(t *testing.T) {
 			}
 
 			rw := httptest.NewRecorder()
-			req := httptest.NewRequest("GET", "/sign_out", nil)
+			req := httptest.NewRequest("GET", "https://example.com/sign_out", nil)
 
 			proxy.SignOutPage(rw, req)
 
@@ -1475,7 +1475,7 @@ func TestSignOutPage(t *testing.T) {
 					t.Errorf("unable to properly parse response: %v", err)
 				}
 
-				expectedBody := "Sign out of <b>localhost</b>"
+				expectedBody := "Sign out of <b>example.com</b>"
 				actualBody := string(respBytes)
 				if !strings.Contains(actualBody, expectedBody) {
 					t.Logf("expected body to contain: %q", expectedBody)
