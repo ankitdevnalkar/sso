@@ -382,7 +382,8 @@ func (p *Authenticator) SignOut(rw http.ResponseWriter, req *http.Request) {
 		p.StatsdClient.Incr("provider_error", tags, 1.0)
 		logger.Error(err, "error revoking session")
 		//TODO: This used to return a sign out page with an error.
-		p.ErrorResponse(rw, req, err.Error(), codeForError(err))
+		//TODO: http.StatusInternalServerError or codeForError(err)
+		p.ErrorResponse(rw, req, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -400,13 +401,6 @@ func (p *Authenticator) OAuthStart(rw http.ResponseWriter, req *http.Request) {
 	nonce := fmt.Sprintf("%x", aead.GenerateKey())
 	p.csrfStore.SetCSRF(rw, req, nonce)
 
-	authRedirectURL := req.URL
-	if !validRedirectURI(authRedirectURL.String(), p.ProxyRootDomains) {
-		tags = append(tags, "error:invalid_redirect_parameter")
-		p.StatsdClient.Incr("application_error", tags, 1.0)
-		p.ErrorResponse(rw, req, "Invalid redirect parameter", http.StatusBadRequest)
-		return
-	}
 	// Here we validate the redirect that is nested within the redirect_uri.
 	// `authRedirectURL` points to step D, `proxyRedirectURL` points to step E.
 	//
@@ -414,21 +408,22 @@ func (p *Authenticator) OAuthStart(rw http.ResponseWriter, req *http.Request) {
 	// /start -> Google -> auth /callback -> /sign_in -> proxy /callback
 	//
 	// * you are here
-	proxyRedirectURL, err := url.Parse(authRedirectURL.Query().Get("redirect_uri"))
+
+	proxyRedirectURL, err := url.Parse(req.URL.Query().Get("redirect_uri"))
 	if err != nil || !validRedirectURI(proxyRedirectURL.String(), p.ProxyRootDomains) {
 		tags = append(tags, "error:invalid_redirect_parameter")
 		p.StatsdClient.Incr("application_error", tags, 1.0)
 		p.ErrorResponse(rw, req, "Invalid redirect parameter", http.StatusBadRequest)
 		return
 	}
-	proxyRedirectSig := authRedirectURL.Query().Get("sig")
-	ts := authRedirectURL.Query().Get("ts")
+	proxyRedirectSig := req.URL.Query().Get("sig")
+	ts := req.URL.Query().Get("ts")
 	if !validSignature(proxyRedirectURL.String(), proxyRedirectSig, ts, p.ProxyClientSecret) {
 		p.ErrorResponse(rw, req, "Invalid redirect parameter", http.StatusBadRequest)
 		return
 	}
 	redirectURI := p.GetRedirectURI(req.Host)
-	state := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%v:%v", nonce, authRedirectURL.String())))
+	state := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%v:%v", nonce, req.URL.String())))
 	signInURL := p.provider.GetSignInURL(redirectURI, state)
 	http.Redirect(rw, req, signInURL, http.StatusFound)
 }
